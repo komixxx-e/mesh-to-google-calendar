@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         МЭШ → Google Календарь
 // @namespace    https://github.com/komixxx-e/mesh-to-google-calendar
-// @version      3.1.0
+// @version      3.1.1
 // @description  Экспорт расписания уроков и пар СПО (Колледж) из МЭШ (school.mos.ru) напрямую в Google Календарь или в формате .ics
 // @author       komixxx-e
 // @match        https://school.mos.ru/*
@@ -52,34 +52,57 @@
         return new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Moscow' });
     }
 
-    // --- Сканирование текста страницы (СПО Колледж & Школа) ---
+    // --- Надёжное сканирование текста страницы (СПО Колледж & Школа) ---
     function scanPageText() {
         const text = document.body ? document.body.innerText : '';
         if (!text) return;
 
         const date = getDateFromUrl();
+        const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
         const found = [];
-        const pattern = /(?:(\d+)\s*(?:занятие|пара|урок)\s+)?(\d{1,2}:\d{2})\s*[-–—]\s*(\d{1,2}:\d{2})(?:[^\n\r]*?(?:каб\.?|ауд\.?)\s*(?:№\s*)?([A-Za-zА-Яа-я0-9\/\-]+))?[^\n\r]*\n+([^\n\r]+)/gi;
 
-        let match;
-        while ((match = pattern.exec(text)) !== null) {
-            const beginTime = match[2];
-            const endTime = match[3];
-            const roomNum = match[4];
-            let subject = match[5].trim();
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
 
-            if (subject.toLowerCase().includes('перемена') || subject.match(/^\d{1,2}:\d{2}/)) continue;
+            // Пропускаем строки перемен/перерывов
+            if (/перемена|перерыв/i.test(line)) continue;
 
-            found.push({
-                subject: subject,
-                date: date,
-                beginTime: beginTime,
-                endTime: endTime,
-                room: roomNum ? `каб. № ${roomNum}` : '',
-                teacher: '',
-                topic: '',
-                homework: ''
-            });
+            // Поиск временного диапазона HH:MM - HH:MM
+            const timeMatch = line.match(/(\d{1,2}:\d{2})\s*[-–—]\s*(\d{1,2}:\d{2})/);
+            if (!timeMatch) continue;
+
+            const beginTime = timeMatch[1];
+            const endTime = timeMatch[2];
+
+            // Проверяем кабинет / аудиторию
+            const roomMatch = line.match(/(?:каб\.?|ауд\.?)\s*(?:№\s*)?([A-Za-zА-Яа-я0-9\/\-]+)/i);
+            const room = roomMatch ? `каб. № ${roomMatch[1]}` : '';
+
+            // Предмет находится на следующей строке (пропуская служебные строки)
+            let subject = '';
+            for (let j = i + 1; j < lines.length && j <= i + 3; j++) {
+                const nextLine = lines[j];
+                if (/перемена|перерыв/i.test(nextLine)) break;
+                if (/\d{1,2}:\d{2}\s*[-–—]\s*\d{1,2}:\d{2}/.test(nextLine)) break;
+                if (/^(?:каб\.|ауд\.)/i.test(nextLine)) continue;
+                if (!subject) {
+                    subject = nextLine;
+                    break;
+                }
+            }
+
+            if (subject) {
+                found.push({
+                    subject: subject,
+                    date: date,
+                    beginTime: beginTime,
+                    endTime: endTime,
+                    room: room,
+                    teacher: '',
+                    topic: '',
+                    homework: ''
+                });
+            }
         }
 
         if (found.length > 0) {
@@ -147,12 +170,24 @@
             const dayEvents = [];
             Object.keys(days).sort().forEach(dateStr => {
                 const dayLessons = days[dateStr];
-                dayLessons.sort((a, b) => (a.beginTime || '') > (b.beginTime || '') ? 1 : -1);
+                // Сортировка по времени начала
+                dayLessons.sort((a, b) => (a.beginTime || '').localeCompare(b.beginTime || ''));
 
-                const firstLesson = dayLessons[0];
-                const lastLesson = dayLessons[dayLessons.length - 1];
-                const startIso = getIsoTime(firstLesson, 'start');
-                const endIso = getIsoTime(lastLesson, 'end');
+                // Ищем самое раннее начало и самое позднее окончание занятий в этот день
+                let earliestStartLesson = dayLessons[0];
+                let latestEndLesson = dayLessons[0];
+
+                for (const l of dayLessons) {
+                    if ((l.beginTime || '') < (earliestStartLesson.beginTime || '')) {
+                        earliestStartLesson = l;
+                    }
+                    if ((l.endTime || '') > (latestEndLesson.endTime || '')) {
+                        latestEndLesson = l;
+                    }
+                }
+
+                const startIso = getIsoTime(earliestStartLesson, 'start');
+                const endIso = getIsoTime(latestEndLesson, 'end');
                 if (!startIso || !endIso) return;
 
                 const descLines = [`📚 Расписание занятий (${dayLessons.length} пар/уроков):\n`];
@@ -645,7 +680,7 @@
                             <div class="mesh-preview-list">
                                 ${collectedLessons.map((l, i) => `
                                     <div class="mesh-preview-item">
-                                        <span style="font-weight:600;">${l.beginTime} ${l.subject}</span>
+                                        <span style="font-weight:600;">${l.beginTime}–${l.endTime} ${l.subject}</span>
                                         <span style="color:#64748b;">${l.room || ''}</span>
                                     </div>
                                 `).join('')}

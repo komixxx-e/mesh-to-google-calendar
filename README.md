@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/badge/Версия-3.1.0-blue?style=flat-square" alt="Version">
+  <img src="https://img.shields.io/badge/Версия-3.1.1-blue?style=flat-square" alt="Version">
   <img src="https://img.shields.io/badge/Поддержка-Школа_и_СПО_(Колледж)-8b5cf6?style=flat-square" alt="Support">
   <img src="https://img.shields.io/badge/Лицензия-MIT-gray?style=flat-square" alt="License">
 </p>
